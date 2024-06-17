@@ -49,24 +49,30 @@ export class TicTacToe extends Room<State> {
         if (client.sessionId === this.state.currentTurn) {
             const playerIds = Array.from(this.state.players.keys())
 
-            const index = action.x + BOARD_WIDTH * action.y
+            const boardIndex = action.x + BOARD_WIDTH * action.y
 
-            if (this.state.board[index] === 0) {
+            if (this.state.board[boardIndex] === 0) {
                 const move = client.sessionId === playerIds[0] ? 1 : 2
-                this.state.board[index] = move
+                this.state.board[boardIndex] = move
 
                 if (this.checkWin(action.x, action.y, move)) {
                     this.state.winner = client.sessionId
                 } else if (this.isGameEnded()) {
                     this.state.draw = true
                 } else {
-                    // switch turn
-                    const otherPlayerSessionId = client.sessionId === playerIds[0] ? playerIds[1] : playerIds[0]
+                    // pass turn to next player
+                    const playerIndex = playerIds.findIndex((sessionId) => sessionId === client.sessionId)
+                    if (playerIndex === -1) {
+                        throw new Error('Invalid session ID')
+                    }
 
-                    this.state.currentTurn = otherPlayerSessionId
+                    const nextPlayerIndex = (playerIndex + 1) % playerIds.length
+                    const nextPlayerSessionId = playerIds[nextPlayerIndex]
 
-                    const isPlayer = this.state.players.get(this.state.currentTurn)
-                    this.triggerAutoMove(this.state.currentTurn, !isPlayer)
+                    this.state.currentTurn = nextPlayerSessionId
+
+                    const isPlayer = this.state.players.get(nextPlayerSessionId)
+                    this.triggerAutoMove(nextPlayerSessionId, !isPlayer)
                 }
             }
         }
@@ -87,13 +93,11 @@ export class TicTacToe extends Room<State> {
             return
         }
 
-        if (forceMove && this.state.currentTurn === sessionId) {
+        const timeout = forceMove ? 10 : TURN_TIMEOUT * 1000
+
+        this.randomMoveTimeout = this.clock.setTimeout(() => {
             this.playerAction({ sessionId } as Client, nextMove)
-        } else {
-            this.randomMoveTimeout = this.clock.setTimeout(() => {
-                this.playerAction({ sessionId } as Client, nextMove)
-            }, TURN_TIMEOUT * 1000)
-        }
+        }, timeout)
     }
 
     randomNextMove() {
@@ -103,7 +107,7 @@ export class TicTacToe extends Room<State> {
         }
 
         const x = index % BOARD_WIDTH
-        const y = Math.floor(Math.random() / BOARD_WIDTH)
+        const y = Math.floor(index / BOARD_WIDTH)
         return { x, y }
     }
 
