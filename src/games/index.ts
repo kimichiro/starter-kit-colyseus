@@ -1,7 +1,10 @@
-import { MyRoom } from './my-room/room'
-import { TicTacToe } from './tic-tac-toe/room'
+import { TurnBasedMatch } from '../rooms/turn-based-match'
+import { TicTacToeEngine } from './tictactoe/engine'
 
-export default {
-    [MyRoom.name.toLowerCase()]: MyRoom,
-    [TicTacToe.name.toLowerCase()]: TicTacToe
-}
+export default [
+    {
+        name: 'tictactoe',
+        room: TurnBasedMatch,
+        engine: TicTacToeEngine
+    }
+]

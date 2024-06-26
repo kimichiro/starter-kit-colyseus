@@ -1,6 +1,9 @@
+import 'reflect-metadata'
+
 import config from '@colyseus/tools'
 import { monitor } from '@colyseus/monitor'
 import { playground } from '@colyseus/playground'
+import { container } from 'tsyringe'
 
 import packageJson from '../package.json'
 import games from './games'
@@ -10,9 +13,10 @@ export default config({
         /**
          * Define your room handlers:
          */
-        for (const gameName in games) {
-            gameServer.define(gameName, games[gameName])
-        }
+        games.forEach(({ name, room, engine }) => {
+            container.register(name, engine)
+            gameServer.define(name, room)
+        })
     },
 
     initializeExpress: (app) => {
