@@ -4,9 +4,9 @@ export abstract class GameEngine<State extends Schema, Settings extends object> 
     #state: State
     #settings: Settings
 
-    constructor(state: State) {
+    constructor(state: State, settings: Settings) {
         this.#state = state
-        this.#settings = {} as Settings
+        this.#settings = settings
     }
 
     get state(): State {
@@ -18,7 +18,7 @@ export abstract class GameEngine<State extends Schema, Settings extends object> 
     }
 
     setup(settings: Settings): void {
-        this.#settings = settings ?? ({} as Settings)
+        this.#settings = settings ?? this.#settings
         this.onSetup(settings)
     }
 

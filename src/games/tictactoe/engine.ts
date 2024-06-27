@@ -87,7 +87,7 @@ class Player extends GamePlayer {
 @injectable()
 export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
     constructor() {
-        super(new GameState(new Area(), 2, 2, [], null, [], null))
+        super(new GameState(new Area(), 2, 2, [], null, [], null), { players: [] })
     }
 
     protected onSetup(settings: GameSettings): void {

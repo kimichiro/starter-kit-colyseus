@@ -11,11 +11,11 @@ export interface AuthObject {
 
 // #region Client messages
 
-export const SeatRequestMessageType = 'seat-request'
-export interface SeatRequestPayload {}
+export const MatchSeatRequestMessageType = 'match-seat-request'
+export interface MatchSeatRequestPayload {}
 
-export const ActionMoveMessageType = 'action-move'
-export interface ActionMovePayload<Action extends GameAction = GameAction> {
+export const GameMoveMessageType = 'game-move'
+export interface GameMovePayload<Action extends GameAction = GameAction> {
     action: Action
 }
 
@@ -50,8 +50,8 @@ export class TurnBasedMatch extends Room {
         this.#options = options
 
         // Setup event handling
-        this.onMessage(SeatRequestMessageType, this.onRequestSeat.bind(this))
-        this.onMessage(ActionMoveMessageType, this.onActionMove.bind(this))
+        this.onMessage(MatchSeatRequestMessageType, this.onMatchSeatRequest.bind(this))
+        this.onMessage(GameMoveMessageType, this.onGameMove.bind(this))
     }
 
     async onJoin(client: Client, _?: unknown, auth?: AuthObject): Promise<void> {
@@ -87,7 +87,7 @@ export class TurnBasedMatch extends Room {
         }
     }
 
-    private onRequestSeat(client: Client, _: SeatRequestPayload): void {
+    private onMatchSeatRequest(client: Client, _: MatchSeatRequestPayload): void {
         const player = this.#players.get(client.sessionId)
         if (player != null) {
             player.connection.status = 'online'
@@ -107,7 +107,7 @@ export class TurnBasedMatch extends Room {
         }
     }
 
-    private onActionMove(client: Client, payload: ActionMovePayload): void {
+    private onGameMove(client: Client, payload: GameMovePayload): void {
         const { action } = payload
 
         const player = this.#engine.players.find(({ id }) => id === client.auth?.id)
