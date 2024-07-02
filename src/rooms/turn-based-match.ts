@@ -60,7 +60,7 @@ export class TurnBasedMatch extends Room {
             return
         }
 
-        const player = new GamePlayer(auth.id, auth.name, new Connection())
+        const player = new GamePlayer(client.sessionId, auth.name, new Connection())
         this.#players.set(client.sessionId, player)
 
         // Lock room when reaches total number of players
@@ -93,28 +93,40 @@ export class TurnBasedMatch extends Room {
             player.connection.status = 'online'
         }
 
+        console.info(
+            `${TurnBasedMatch.name}.${this.onMatchSeatRequest.name}#${this.roomId}: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
+        )
+
         const players = Array.from(this.#players.values())
         if (
             this.clients.length === this.#engine.maxPlayers &&
             players.length === this.#engine.maxPlayers &&
             players.every(({ connection: { status } }) => status === 'online')
         ) {
-            // Initialize game state
-            this.#engine.setup({ players, options: this.#options })
+            try {
+                // Initialize game state
+                this.#engine.setup({ players, options: this.#options })
 
-            const payload: GameStartedPayload = {}
-            this.broadcast(GameStartedMessageType, payload)
+                const payload: GameStartedPayload = {}
+                this.broadcast(GameStartedMessageType, payload)
+            } catch (error) {
+                console.warn(`${TurnBasedMatch.name}.${this.onMatchSeatRequest.name}#${this.roomId}: ${error}`)
+            }
         }
     }
 
     private onGameMove(client: Client, payload: GameMovePayload): void {
-        const { action } = payload
+        try {
+            const { action } = payload
 
-        const player = this.#engine.players.find(({ id }) => id === client.auth?.id)
-        if (player == null) {
-            throw new Error('Invalid player')
+            const player = this.#engine.players.find(({ id }) => id === client.sessionId)
+            if (player == null) {
+                throw new Error('Invalid player')
+            }
+
+            this.#engine.move(player, action)
+        } catch (error) {
+            console.warn(`${TurnBasedMatch.name}.${this.onGameMove.name}#${this.roomId}: ${error}`)
         }
-
-        this.#engine.move(player, action)
     }
 }

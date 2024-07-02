@@ -14,8 +14,8 @@ import {
 } from '../../engines/turn-based-engine'
 
 enum Role {
-    Oh = 'O',
-    Ex = 'X'
+    Ex = 'X',
+    Oh = 'O'
 }
 
 enum Position {
@@ -60,7 +60,7 @@ class Area extends GameArea<Action> {
 
     @filterChildren(function (this: Area, client: Client, _: string, value: Action, root: GameState<Area, Player>) {
         return (
-            client.auth?.id === root.currentTurn?.id &&
+            client.sessionId === root.currentTurn?.id &&
             value.role === root.currentTurn?.role &&
             this.table.get(value.position) == null
         )
@@ -91,12 +91,12 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
     }
 
     protected onSetup(settings: GameSettings): void {
-        const roles = [Role.Oh, Role.Ex]
+        const roles = [Role.Ex, Role.Oh]
         const players = settings.players.map<Player>(
             (player) => new Player(player, Math.round(Math.random()) === 0 ? roles.shift() : roles.pop())
         )
 
-        const currentRole = Role.Oh
+        const currentRole = Role.Ex
         this.state.players.push(...players)
         this.state.currentTurn = players.find((player) => player.role === currentRole)
 
@@ -114,7 +114,9 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
     move(player: Player, action: Action): void {
         const isConcluded = this.state.result != null
         const foundPlayer = this.state.players.some(({ id, role }) => id === player.id && role === action.role)
-        const actionIndex = this.state.area.actions.findIndex(({ role }) => role === action.role)
+        const actionIndex = this.state.area.actions.findIndex(
+            ({ position, role }) => position === action.position && role === action.role
+        )
 
         if (isConcluded || !foundPlayer || actionIndex === -1) {
             throw new Error('Invalid move')
@@ -129,7 +131,7 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
         if (result == null) {
             this.state.area.actions.splice(actionIndex, 1)
 
-            const otherRole = [Role.Oh, Role.Ex].filter((role) => role !== action.role).pop()
+            const otherRole = [Role.Ex, Role.Oh].filter((role) => role !== action.role).pop()
             this.state.currentTurn = this.state.players.find((player) => player.role === otherRole)
             this.state.area.actions = this.state.area.actions.map((a) => new Action(otherRole, a.position))
         } else {
