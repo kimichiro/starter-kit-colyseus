@@ -19,10 +19,16 @@ export class Connection extends Schema {
     @type('string') status: ConnectionStatus = 'unknown'
 }
 
+export class TimeDuration extends Schema {
+    @type('number') minutes: number = 0
+    @type('number') seconds: number = 0
+}
+
 export class GamePlayer extends Schema {
     @type('string') readonly id: string
     @type('string') readonly name: string
     @type(Connection) readonly connection: Connection
+    @type(TimeDuration) readonly remainingTime: TimeDuration
 
     constructor(id: string, name: string, connection: Connection) {
         super()
@@ -30,6 +36,7 @@ export class GamePlayer extends Schema {
         this.id = id
         this.name = name
         this.connection = connection
+        this.remainingTime = new TimeDuration()
     }
 }
 
@@ -107,10 +114,8 @@ export abstract class TurnBasedEngine<
     Player extends GamePlayer = GamePlayer,
     Move extends GameMove = GameMove,
     Result extends GameResult = GameResult,
-    State extends GameState<Area, Player, Move, Result> = GameState<Area, Player, Move, Result>,
-    Options = unknown,
-    Settings extends GameSettings<Options> = GameSettings<Options>
-> extends GameEngine<State, Settings> {
+    Options = unknown
+> extends GameEngine<GameState<Area, Player, Move, Result>, GameSettings<Options>> {
     get minPlayers(): number {
         return this.state.minPlayers
     }

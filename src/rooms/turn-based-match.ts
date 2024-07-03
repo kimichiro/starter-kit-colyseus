@@ -2,6 +2,7 @@ import { Client, Room } from 'colyseus'
 import { IncomingMessage } from 'http'
 import { container } from 'tsyringe'
 
+import { GameTimer } from '../engines/game-timer'
 import { Connection, GameAction, GamePlayer, TurnBasedEngine } from '../engines/turn-based-engine'
 
 export interface AuthObject {
@@ -105,7 +106,7 @@ export class TurnBasedMatch extends Room {
         ) {
             try {
                 // Initialize game state
-                this.#engine.setup({ players, options: this.#options })
+                this.#engine.setup({ timer: new GameTimer(this.clock) }, { players, options: this.#options })
 
                 const payload: GameStartedPayload = {}
                 this.broadcast(GameStartedMessageType, payload)

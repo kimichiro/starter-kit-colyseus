@@ -3,6 +3,8 @@ import 'reflect-metadata'
 import config from '@colyseus/tools'
 import { monitor } from '@colyseus/monitor'
 import { playground } from '@colyseus/playground'
+import dayjs from 'dayjs'
+import durationPlugin from 'dayjs/plugin/duration'
 import { container } from 'tsyringe'
 
 import packageJson from '../package.json'
@@ -49,5 +51,6 @@ export default config({
         /**
          * Before before gameServer.listen() is called.
          */
+        dayjs.extend(durationPlugin)
     }
 })

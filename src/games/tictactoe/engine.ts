@@ -2,6 +2,7 @@ import { filterChildren, MapSchema, type } from '@colyseus/schema'
 import { Client } from 'colyseus'
 import { injectable } from 'tsyringe'
 
+import { CountdownTimer } from '../../engines/game-timer'
 import {
     GameAction,
     GameArea,
@@ -84,10 +85,17 @@ class Player extends GamePlayer {
     }
 }
 
+const TIMEOUT_MAXIMUM = 30000
+const TIMEOUT_RESTORE = 20000
+
 @injectable()
 export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
+    #timers: Map<Player, CountdownTimer>
+
     constructor() {
         super(new GameState(new Area(), 2, 2, [], null, [], null), { players: [] })
+
+        this.#timers = new Map<Player, CountdownTimer>()
     }
 
     protected onSetup(settings: GameSettings): void {
@@ -96,8 +104,19 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
             (player) => new Player(player, Math.round(Math.random()) === 0 ? roles.shift() : roles.pop())
         )
 
-        const currentRole = Role.Ex
+        players.forEach((player) => {
+            const timer = this.context.timer.createCountdownTimer(TIMEOUT_MAXIMUM, ({ minutes, seconds }) => {
+                player.remainingTime.minutes = minutes
+                player.remainingTime.seconds = seconds
+            })
+            this.#timers.set(player, timer)
+
+            player.remainingTime.minutes = timer.minutes
+            player.remainingTime.seconds = timer.seconds
+        })
         this.state.players.push(...players)
+
+        const currentRole = Role.Ex
         this.state.currentTurn = players.find((player) => player.role === currentRole)
 
         this.state.area.actions.push(new Action(currentRole, Position.A1))
@@ -109,6 +128,8 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
         this.state.area.actions.push(new Action(currentRole, Position.C1))
         this.state.area.actions.push(new Action(currentRole, Position.C2))
         this.state.area.actions.push(new Action(currentRole, Position.C3))
+
+        this.resumeTimer()
     }
 
     move(player: Player, action: Action): void {
@@ -122,6 +143,8 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
             throw new Error('Invalid move')
         }
 
+        this.pauseTimer()
+
         this.state.area.table.set(action.position, action.role)
 
         this.state.moves.push(new GameMove(action.position, player))
@@ -134,6 +157,8 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
             const otherRole = [Role.Ex, Role.Oh].filter((role) => role !== action.role).pop()
             this.state.currentTurn = this.state.players.find((player) => player.role === otherRole)
             this.state.area.actions = this.state.area.actions.map((a) => new Action(otherRole, a.position))
+
+            this.resumeTimer()
         } else {
             this.state.currentTurn = null
             this.state.area.actions = []
@@ -163,5 +188,25 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
         }
 
         return null
+    }
+
+    private resumeTimer(): void {
+        const timer = this.#timers.get(this.state.currentTurn)
+        if (timer != null) {
+            timer.resume()
+        }
+
+        if (this.state.currentTurn != null) {
+            this.state.currentTurn.remainingTime.minutes = timer.minutes
+            this.state.currentTurn.remainingTime.seconds = timer.seconds
+        }
+    }
+
+    private pauseTimer(): void {
+        const timer = this.#timers.get(this.state.currentTurn)
+        if (timer != null) {
+            timer.pause()
+            timer.increase(TIMEOUT_RESTORE)
+        }
     }
 }
