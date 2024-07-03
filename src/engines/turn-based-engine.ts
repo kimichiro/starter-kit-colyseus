@@ -14,7 +14,7 @@ export abstract class GameArea<Action extends GameAction = GameAction> extends S
     }
 }
 
-export type ConnectionStatus = 'unknown' | 'online'
+export type ConnectionStatus = 'unknown' | 'online' | 'offline'
 export class Connection extends Schema {
     @type('string') status: ConnectionStatus = 'unknown'
 }

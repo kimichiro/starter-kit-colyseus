@@ -12,8 +12,8 @@ export interface AuthObject {
 
 // #region Client messages
 
-export const MatchSeatRequestMessageType = 'match-seat-request'
-export interface MatchSeatRequestPayload {}
+export const MatchAskMessageType = 'match-ask'
+export interface MatchAskPayload {}
 
 export const GameMoveMessageType = 'game-move'
 export interface GameMovePayload<Action extends GameAction = GameAction> {
@@ -51,11 +51,15 @@ export class TurnBasedMatch extends Room {
         this.#options = options
 
         // Setup event handling
-        this.onMessage(MatchSeatRequestMessageType, this.onMatchSeatRequest.bind(this))
+        this.onMessage(MatchAskMessageType, this.onMatchAsk.bind(this))
         this.onMessage(GameMoveMessageType, this.onGameMove.bind(this))
     }
 
     async onJoin(client: Client, _?: unknown, auth?: AuthObject): Promise<void> {
+        console.info(
+            `[${TurnBasedMatch.name}][${this.roomId}] join: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
+        )
+
         if (auth == null) {
             client.leave()
             return
@@ -72,7 +76,30 @@ export class TurnBasedMatch extends Room {
         // TODO: Reconnect user with auth.id (cookie: visitorId)
     }
 
-    onLeave(client: Client, _: boolean): void {
+    async onLeave(client: Client, consented: boolean): Promise<void> {
+        console.info(
+            `[${TurnBasedMatch.name}][${this.roomId}] leave: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
+        )
+
+        const player = this.#players.get(client.sessionId)
+        if (player != null) {
+            player.connection.status = 'offline'
+        }
+
+        if (!consented) {
+            try {
+                await this.allowReconnection(client, 60)
+
+                if (player != null) {
+                    player.connection.status = 'online'
+                }
+
+                return
+            } catch (error) {
+                console.warn(`[${TurnBasedMatch.name}][${this.roomId}] reconnection: ${error}`)
+            }
+        }
+
         // Update the presence of the member of the room
         this.#players.delete(client.sessionId)
 
@@ -88,30 +115,32 @@ export class TurnBasedMatch extends Room {
         }
     }
 
-    private onMatchSeatRequest(client: Client, _: MatchSeatRequestPayload): void {
+    private onMatchAsk(client: Client, _: MatchAskPayload): void {
+        console.info(
+            `[${TurnBasedMatch.name}][${this.roomId}] ${MatchAskMessageType}: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
+        )
+
         const player = this.#players.get(client.sessionId)
         if (player != null) {
             player.connection.status = 'online'
         }
 
-        console.info(
-            `${TurnBasedMatch.name}.${this.onMatchSeatRequest.name}#${this.roomId}: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
-        )
+        if (!this.#engine.started) {
+            const players = Array.from(this.#players.values())
+            if (
+                this.clients.length === this.#engine.maxPlayers &&
+                players.length === this.#engine.maxPlayers &&
+                players.every(({ connection: { status } }) => status === 'online')
+            ) {
+                try {
+                    // Initialize game state
+                    this.#engine.setup({ timer: new GameTimer(this.clock) }, { players, options: this.#options })
 
-        const players = Array.from(this.#players.values())
-        if (
-            this.clients.length === this.#engine.maxPlayers &&
-            players.length === this.#engine.maxPlayers &&
-            players.every(({ connection: { status } }) => status === 'online')
-        ) {
-            try {
-                // Initialize game state
-                this.#engine.setup({ timer: new GameTimer(this.clock) }, { players, options: this.#options })
-
-                const payload: GameStartedPayload = {}
-                this.broadcast(GameStartedMessageType, payload)
-            } catch (error) {
-                console.warn(`${TurnBasedMatch.name}.${this.onMatchSeatRequest.name}#${this.roomId}: ${error}`)
+                    const payload: GameStartedPayload = {}
+                    this.broadcast(GameStartedMessageType, payload)
+                } catch (error) {
+                    console.warn(`[${TurnBasedMatch.name}][${this.roomId}] ${MatchAskMessageType}: ${error}`)
+                }
             }
         }
     }
@@ -127,7 +156,7 @@ export class TurnBasedMatch extends Room {
 
             this.#engine.move(player, action)
         } catch (error) {
-            console.warn(`${TurnBasedMatch.name}.${this.onGameMove.name}#${this.roomId}: ${error}`)
+            console.warn(`[${TurnBasedMatch.name}][${this.roomId}] ${GameMoveMessageType}: ${error}`)
         }
     }
 }

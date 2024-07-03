@@ -93,7 +93,7 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
     #timers: Map<Player, CountdownTimer>
 
     constructor() {
-        super(new GameState(new Area(), 2, 2, [], null, [], null), { players: [] })
+        super(new GameState(new Area(), 2, 2, [], null, [], null))
 
         this.#timers = new Map<Player, CountdownTimer>()
     }
