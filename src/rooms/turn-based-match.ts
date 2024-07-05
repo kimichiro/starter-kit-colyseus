@@ -2,10 +2,17 @@ import { Client, Room } from 'colyseus'
 import { IncomingMessage } from 'http'
 import { container } from 'tsyringe'
 
-import { GameTimer } from '../engines/game-timer'
-import { Connection, GameAction, GamePlayer, TurnBasedEngine } from '../engines/turn-based-engine'
+import { CountdownTimer, GameTimer } from '../engines/game-timer'
+import {
+    Connection,
+    GameAction,
+    GameParticipant,
+    TimeDuration,
+    TurnBasedContext,
+    TurnBasedEngine
+} from '../engines/turn-based-engine'
 
-export interface AuthObject {
+export interface IdToken {
     id: string
     name: string
 }
@@ -32,78 +39,124 @@ export interface GameEndedPayload {}
 
 // #endregion
 
+const TIMER_TIMEOUT_INITIAL = 30000
+const TIMER_TIMEOUT_DEFAULT_REGAIN = 20000
+const TIMER_TIMEOUT_MINIMUM_REGAIN = 10000
+
 export class TurnBasedMatch extends Room {
-    #players: Map<string, GamePlayer>
     #engine: TurnBasedEngine
+    #context: TurnBasedContext<GameParticipant>
+    #timer: GameTimer
+    #timers: Map<GameParticipant, CountdownTimer>
     #options?: unknown
 
-    static async onAuth(token: string, _: IncomingMessage): Promise<AuthObject> {
+    static async onAuth(token: string, _: IncomingMessage): Promise<IdToken> {
         // Authenticate user
         return JSON.parse(Buffer.from(token, 'base64').toString())
     }
 
     onCreate(options?: unknown): void {
-        this.#players = new Map<string, GamePlayer>()
-
         this.#engine = container.resolve(this.roomName)
         this.setState(this.#engine.state)
+
+        this.#context = {
+            minParticipants: 1,
+            maxParticipants: Infinity,
+            participants: [],
+            currentTurn: null,
+
+            resumeCountdown: () => {
+                if (this.#context.currentTurn != null) {
+                    this.resumeCountdownTimer(this.#context.currentTurn)
+                }
+            },
+            pauseCountdown: () => {
+                if (this.#context.currentTurn != null) {
+                    this.pauseCountdownTimer(this.#context.currentTurn)
+                }
+            }
+        }
+        this.#engine.init(this.#context)
+
+        this.#timer = new GameTimer(this.clock)
+        this.#timers = new Map<GameParticipant, CountdownTimer>()
 
         this.#options = options
 
         // Setup event handling
         this.onMessage(MatchAskMessageType, this.onMatchAsk.bind(this))
         this.onMessage(GameMoveMessageType, this.onGameMove.bind(this))
+
+        // Lock room when reaches total number of participants
+        this.maxClients = this.#context.maxParticipants
     }
 
-    async onJoin(client: Client, _?: unknown, auth?: AuthObject): Promise<void> {
-        console.info(
-            `[${TurnBasedMatch.name}][${this.roomId}] join: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
-        )
+    async onJoin(client: Client, _?: unknown, idToken?: IdToken): Promise<void> {
+        console.info(`${this.roomId}#${client.sessionId} join: room capacity ${this.clients.length}/${this.maxClients}`)
 
-        if (auth == null) {
+        if (idToken == null) {
             client.leave()
             return
         }
 
-        const player = new GamePlayer(client.sessionId, auth.name, new Connection())
-        this.#players.set(client.sessionId, player)
-
-        // Lock room when reaches total number of players
-        if (this.clients.length === this.#engine.maxPlayers) {
-            await this.lock()
+        let participantIndex: number = -1
+        if (this.#context.participants.length === this.maxClients) {
+            // reject different user from joining in-progress game room
+            participantIndex = this.#context.participants.findIndex(({ userId }) => userId === idToken.id)
+            if (participantIndex === -1) {
+                client.leave()
+                return
+            }
         }
 
-        // TODO: Reconnect user with auth.id (cookie: visitorId)
+        const oldParticipant = participantIndex === -1 ? null : this.#context.participants[participantIndex]
+        const newParticipant = new GameParticipant(
+            client.sessionId,
+            idToken.name,
+            idToken.id,
+            oldParticipant?.connection ?? new Connection(),
+            oldParticipant?.remainingTime ?? new TimeDuration()
+        )
+        if (participantIndex !== -1) {
+            this.#context.participants.splice(participantIndex, 1, newParticipant)
+        } else {
+            this.#context.participants.push(newParticipant)
+        }
+
+        this.createCountdownTimer(newParticipant, oldParticipant == null)
+
+        if (oldParticipant != null) {
+            this.#engine.updateParticipant(oldParticipant, newParticipant)
+        }
     }
 
     async onLeave(client: Client, consented: boolean): Promise<void> {
         console.info(
-            `[${TurnBasedMatch.name}][${this.roomId}] leave: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
+            `${this.roomId}#${client.sessionId} leave(${consented}): room capacity ${this.clients.length}/${this.maxClients}`
         )
 
-        const player = this.#players.get(client.sessionId)
-        if (player != null) {
-            player.connection.status = 'offline'
+        const participant = this.#context.participants.find(({ id }) => id === client.sessionId)
+        if (participant != null) {
+            participant.connection.status = 'offline'
+            this.disposeCountdownTimer(participant)
         }
+
+        // unlock room to allow connection from a fresh reload
+        this.unlock()
 
         if (!consented) {
             try {
                 await this.allowReconnection(client, 60)
 
-                if (player != null) {
-                    player.connection.status = 'online'
+                if (participant != null) {
+                    participant.connection.status = 'online'
                 }
 
                 return
             } catch (error) {
-                console.warn(`[${TurnBasedMatch.name}][${this.roomId}] reconnection: ${error}`)
+                console.warn(`${this.roomId}#${client.sessionId} reconnection: ${error}`)
             }
         }
-
-        // Update the presence of the member of the room
-        this.#players.delete(client.sessionId)
-
-        // TODO: Suspend user with auth.id (cookie: visitorId)
     }
 
     onBeforePatch(): void {
@@ -115,31 +168,34 @@ export class TurnBasedMatch extends Room {
         }
     }
 
-    private onMatchAsk(client: Client, _: MatchAskPayload): void {
+    private async onMatchAsk(client: Client, _: MatchAskPayload): Promise<void> {
         console.info(
-            `[${TurnBasedMatch.name}][${this.roomId}] ${MatchAskMessageType}: room capacity ${this.clients.length}/${this.#engine.maxPlayers}`
+            `${this.roomId}#${client.sessionId} ${MatchAskMessageType}: room capacity ${this.clients.length}/${this.maxClients}`
         )
 
-        const player = this.#players.get(client.sessionId)
-        if (player != null) {
-            player.connection.status = 'online'
+        const participant = this.#context.participants.find(({ id }) => id === client.sessionId)
+        if (participant != null) {
+            participant.connection.status = 'online'
         }
 
         if (!this.#engine.started) {
-            const players = Array.from(this.#players.values())
+            const participants = this.#context.participants
             if (
-                this.clients.length === this.#engine.maxPlayers &&
-                players.length === this.#engine.maxPlayers &&
-                players.every(({ connection: { status } }) => status === 'online')
+                this.clients.length === this.#context.maxParticipants &&
+                participants.length === this.#context.maxParticipants &&
+                participants.every(({ connection: { status } }) => status === 'online')
             ) {
                 try {
                     // Initialize game state
-                    this.#engine.setup({ timer: new GameTimer(this.clock) }, { players, options: this.#options })
+                    this.#engine.setup(typeof this.#options === 'object' ? { ...this.#options } : {})
 
                     const payload: GameStartedPayload = {}
                     this.broadcast(GameStartedMessageType, payload)
+
+                    // set flag to avoid joining in-progress game room from lobby
+                    await this.setMetadata({ started: true })
                 } catch (error) {
-                    console.warn(`[${TurnBasedMatch.name}][${this.roomId}] ${MatchAskMessageType}: ${error}`)
+                    console.warn(`${this.roomId}#${client.sessionId} ${MatchAskMessageType}: ${error}`)
                 }
             }
         }
@@ -149,14 +205,65 @@ export class TurnBasedMatch extends Room {
         try {
             const { action } = payload
 
-            const player = this.#engine.players.find(({ id }) => id === client.sessionId)
-            if (player == null) {
-                throw new Error('Invalid player')
+            const participant = this.#context.participants.find(({ id }) => id === client.sessionId)
+            if (participant == null) {
+                throw new Error('Invalid participant')
             }
 
-            this.#engine.move(player, action)
+            this.#engine.move(participant, action)
         } catch (error) {
-            console.warn(`[${TurnBasedMatch.name}][${this.roomId}] ${GameMoveMessageType}: ${error}`)
+            console.warn(`${this.roomId}#${client.sessionId} ${GameMoveMessageType}: ${error}`)
         }
+    }
+
+    private createCountdownTimer(participant: GameParticipant, renew: boolean): void {
+        const timer = this.#timer.createCountdownTimer(
+            renew ? TIMER_TIMEOUT_INITIAL : participant.remainingTime.asMilliseconds,
+            ({ minutes, seconds, asMilliseconds }) => {
+                participant.remainingTime.minutes = minutes
+                participant.remainingTime.seconds = seconds
+                participant.remainingTime.asMilliseconds = asMilliseconds
+            }
+        )
+        this.#timers.set(participant, timer)
+
+        participant.remainingTime.minutes = timer.minutes
+        participant.remainingTime.seconds = timer.seconds
+        participant.remainingTime.asMilliseconds = timer.asMilliseconds
+
+        this.#timers.set(participant, timer)
+    }
+
+    private resumeCountdownTimer(participant: GameParticipant): void {
+        const timer = this.#timers.get(participant)
+        if (timer != null) {
+            timer.resume()
+
+            participant.remainingTime.minutes = timer.minutes
+            participant.remainingTime.seconds = timer.seconds
+            participant.remainingTime.asMilliseconds = timer.asMilliseconds
+        }
+    }
+
+    private pauseCountdownTimer(participant: GameParticipant): void {
+        const timer = this.#timers.get(this.state.currentTurn)
+        if (timer != null) {
+            timer.pause()
+
+            const regainTimeout =
+                timer.asMilliseconds > TIMER_TIMEOUT_INITIAL
+                    ? TIMER_TIMEOUT_MINIMUM_REGAIN
+                    : TIMER_TIMEOUT_DEFAULT_REGAIN
+            timer.increase(regainTimeout)
+
+            participant.remainingTime.minutes = timer.minutes
+            participant.remainingTime.seconds = timer.seconds
+            participant.remainingTime.asMilliseconds = timer.asMilliseconds
+        }
+    }
+
+    private disposeCountdownTimer(participant: GameParticipant): void {
+        this.#timers.get(participant)?.clear()
+        this.#timers.delete(participant)
     }
 }

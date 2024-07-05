@@ -1,14 +1,11 @@
 import { Schema } from '@colyseus/schema'
-import { GameTimer } from './game-timer'
 
-export interface GameContext {
-    timer: GameTimer
-}
+export interface GameContext {}
 
-export abstract class GameEngine<State extends Schema, Settings extends object> {
+export abstract class GameEngine<State extends Schema, Context extends GameContext, Settings extends object> {
     #state: State
     #started: boolean
-    #context: GameContext
+    #context: Context
     #settings: Settings
 
     constructor(state: State) {
@@ -24,7 +21,7 @@ export abstract class GameEngine<State extends Schema, Settings extends object> 
         return this.#started
     }
 
-    get context(): GameContext {
+    get context(): Context {
         if (this.#context == null) {
             throw new Error(`Engine is not setup yet`)
         }
@@ -38,14 +35,18 @@ export abstract class GameEngine<State extends Schema, Settings extends object> 
         return this.#settings
     }
 
-    setup(context: GameContext, settings: Settings): void {
+    init(context: Context): void {
         this.#context = context
-        this.#settings = settings
+        this.onInit()
+    }
 
+    setup(settings: Settings): void {
+        this.#settings = settings
         this.onSetup(settings)
 
         this.#started = true
     }
 
+    protected abstract onInit(): void
     protected abstract onSetup(settings: Settings): void
 }

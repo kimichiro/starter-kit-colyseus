@@ -2,14 +2,12 @@ import { filterChildren, MapSchema, type } from '@colyseus/schema'
 import { Client } from 'colyseus'
 import { injectable } from 'tsyringe'
 
-import { CountdownTimer } from '../../engines/game-timer'
 import {
     GameAction,
     GameArea,
     GameMove,
-    GamePlayer,
+    GameParticipant,
     GameResult,
-    GameSettings,
     GameState,
     TurnBasedEngine
 } from '../../engines/turn-based-engine'
@@ -75,49 +73,32 @@ class Area extends GameArea<Action> {
     }
 }
 
-class Player extends GamePlayer {
+class Player extends GameParticipant {
     @type('string') role: Role
-
-    constructor(player: GamePlayer, role: Role) {
-        super(player.id, player.name, player.connection)
-
-        this.role = role
-    }
 }
-
-const TIMEOUT_MAXIMUM = 30000
-const TIMEOUT_RESTORE = 20000
 
 @injectable()
 export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
-    #timers: Map<Player, CountdownTimer>
-
     constructor() {
-        super(new GameState(new Area(), 2, 2, [], null, [], null))
-
-        this.#timers = new Map<Player, CountdownTimer>()
+        super(new GameState(new Area(), [], null, [], null))
     }
 
-    protected onSetup(settings: GameSettings): void {
+    protected onInit(): void {
+        this.context.minParticipants = 2
+        this.context.maxParticipants = 2
+    }
+
+    protected onSetup(): void {
+        this.state.participants.splice(0, this.state.participants.length)
+        this.state.participants.push(...this.context.participants)
+
         const roles = [Role.Ex, Role.Oh]
-        const players = settings.players.map<Player>(
-            (player) => new Player(player, Math.round(Math.random()) === 0 ? roles.shift() : roles.pop())
-        )
-
-        players.forEach((player) => {
-            const timer = this.context.timer.createCountdownTimer(TIMEOUT_MAXIMUM, ({ minutes, seconds }) => {
-                player.remainingTime.minutes = minutes
-                player.remainingTime.seconds = seconds
-            })
-            this.#timers.set(player, timer)
-
-            player.remainingTime.minutes = timer.minutes
-            player.remainingTime.seconds = timer.seconds
+        this.context.participants.forEach((participant) => {
+            participant.role = Math.round(Math.random()) === 0 ? roles.shift() : roles.pop()
         })
-        this.state.players.push(...players)
 
         const currentRole = Role.Ex
-        this.state.currentTurn = players.find((player) => player.role === currentRole)
+        this.state.currentTurn = this.context.participants.find((participant) => participant.role === currentRole)
 
         this.state.area.actions.push(new Action(currentRole, Position.A1))
         this.state.area.actions.push(new Action(currentRole, Position.A2))
@@ -129,25 +110,42 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
         this.state.area.actions.push(new Action(currentRole, Position.C2))
         this.state.area.actions.push(new Action(currentRole, Position.C3))
 
-        this.resumeTimer()
+        this.context.currentTurn = this.state.currentTurn
+        this.context.resumeCountdown()
     }
 
-    move(player: Player, action: Action): void {
+    updateParticipant(previous: Player, current: Player): void {
+        current.role = previous.role
+
+        this.state.participants.splice(0, this.state.participants.length)
+        this.state.participants.push(...this.context.participants)
+
+        if (this.state.currentTurn === previous) {
+            this.state.currentTurn = current
+            this.context.currentTurn = this.state.currentTurn
+
+            this.context.resumeCountdown()
+        }
+    }
+
+    move(participant: Player, action: Action): void {
         const isConcluded = this.state.result != null
-        const foundPlayer = this.state.players.some(({ id, role }) => id === player.id && role === action.role)
+        const foundParticipant = this.state.participants.some(
+            ({ userId, role }) => userId === participant.userId && role === action.role
+        )
         const actionIndex = this.state.area.actions.findIndex(
             ({ position, role }) => position === action.position && role === action.role
         )
 
-        if (isConcluded || !foundPlayer || actionIndex === -1) {
+        if (isConcluded || !foundParticipant || actionIndex === -1) {
             throw new Error('Invalid move')
         }
 
-        this.pauseTimer()
+        this.context.pauseCountdown()
 
         this.state.area.table.set(action.position, action.role)
 
-        this.state.moves.push(new GameMove(action.position, player))
+        this.state.moves.push(new GameMove(action.position, participant))
 
         const result = this.checkResult()
 
@@ -155,16 +153,17 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
             this.state.area.actions.splice(actionIndex, 1)
 
             const otherRole = [Role.Ex, Role.Oh].filter((role) => role !== action.role).pop()
-            this.state.currentTurn = this.state.players.find((player) => player.role === otherRole)
+            this.state.currentTurn = this.state.participants.find((participant) => participant.role === otherRole)
             this.state.area.actions = this.state.area.actions.map((a) => new Action(otherRole, a.position))
-
-            this.resumeTimer()
         } else {
             this.state.currentTurn = null
             this.state.area.actions = []
 
             this.state.result = result
         }
+
+        this.context.currentTurn = this.state.currentTurn
+        this.context.resumeCountdown()
     }
 
     private checkResult(): GameResult | null {
@@ -175,7 +174,7 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
             return move != null && roles.every((role) => role === move)
         })
         if (winningMove != null) {
-            const winner = this.state.players.find(({ role }) => role === winningMove.at(0))
+            const winner = this.state.participants.find(({ role }) => role === winningMove.at(0))
             return new GameResult(false, winner)
         }
 
@@ -188,25 +187,5 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
         }
 
         return null
-    }
-
-    private resumeTimer(): void {
-        const timer = this.#timers.get(this.state.currentTurn)
-        if (timer != null) {
-            timer.resume()
-        }
-
-        if (this.state.currentTurn != null) {
-            this.state.currentTurn.remainingTime.minutes = timer.minutes
-            this.state.currentTurn.remainingTime.seconds = timer.seconds
-        }
-    }
-
-    private pauseTimer(): void {
-        const timer = this.#timers.get(this.state.currentTurn)
-        if (timer != null) {
-            timer.pause()
-            timer.increase(TIMEOUT_RESTORE)
-        }
     }
 }

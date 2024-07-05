@@ -15,6 +15,8 @@ export interface CountdownTimer extends Timer {
     readonly seconds: number
     readonly milliseconds: number
 
+    readonly asMilliseconds: number
+
     increase: (timeout: number) => void
     decrease: (timeout: number) => void
 }
@@ -29,8 +31,7 @@ export class GameTimer {
     createCountdownTimer(
         initial: number,
         handler?: TimerHandler<CountdownTimer>,
-        interval: number = 1000,
-        maximum: number = initial
+        interval: number = 1000
     ): CountdownTimer {
         let duration = dayjs.duration(initial)
         const delayed = this.#clock.setInterval(() => {
@@ -54,14 +55,14 @@ export class GameTimer {
             get milliseconds() {
                 return duration.milliseconds()
             },
+            get asMilliseconds() {
+                return duration.asMilliseconds()
+            },
             pause: () => delayed.pause(),
             resume: () => delayed.resume(),
             clear: () => delayed.clear(),
             increase: (timeout) => {
                 duration = duration.add(timeout)
-                if (duration.asMilliseconds() > maximum) {
-                    duration = dayjs.duration(maximum)
-                }
             },
             decrease: (timeout) => {
                 duration = duration.subtract(timeout)
