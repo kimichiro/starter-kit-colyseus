@@ -8,7 +8,7 @@
         "node": ">= 16.13.0"
     },
     "scripts": {
-        "start": "tsx watch src/index.ts",
+        "start": "node build/src/index.js",
         "loadtest:myroom": "tsx loadtest/index.ts --room myroom --numClients 2",
         "loadtest:tictactoe": "tsx loadtest/index.ts --room tictactoe --numClients 1000",
         "build": "npm run clean && tsc",

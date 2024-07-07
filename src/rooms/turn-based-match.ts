@@ -126,7 +126,7 @@ export class TurnBasedMatch extends Room {
         this.createCountdownTimer(newParticipant, oldParticipant == null)
 
         if (oldParticipant != null) {
-            this.#engine.updateParticipant(oldParticipant, newParticipant)
+            this.#engine.updateParticipant(oldParticipant, newParticipant, participantIndex)
         }
     }
 

@@ -120,7 +120,7 @@ export abstract class TurnBasedEngine<
     Result extends GameResult = GameResult,
     Settings extends GameSettings = GameSettings
 > extends GameEngine<GameState<Area, Participant, Move, Result>, TurnBasedContext<Participant>, Settings> {
-    abstract updateParticipant(previous: Participant, current: Participant): void
+    abstract updateParticipant(previous: Participant, current: Participant, index: number): void
 
     abstract move(participant: Participant, action: Action): void
 }

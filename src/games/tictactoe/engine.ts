@@ -89,12 +89,13 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
     }
 
     protected onSetup(): void {
-        this.state.participants.splice(0, this.state.participants.length)
-        this.state.participants.push(...this.context.participants)
-
         const roles = [Role.Ex, Role.Oh]
-        this.context.participants.forEach((participant) => {
-            participant.role = Math.round(Math.random()) === 0 ? roles.shift() : roles.pop()
+        this.context.participants.forEach(({ id, name, userId, connection, remainingTime }, index) => {
+            const player = new Player(id, name, userId, connection, remainingTime)
+            player.role = Math.round(Math.random()) === 0 ? roles.shift() : roles.pop()
+
+            this.context.participants[index] = player
+            this.state.participants.push(player)
         })
 
         const currentRole = Role.Ex
@@ -114,15 +115,17 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
         this.context.resumeCountdown()
     }
 
-    updateParticipant(previous: Player, current: Player): void {
-        current.role = previous.role
+    updateParticipant(previous: Player, current: Player, index: number): void {
+        const { id, name, userId, connection, remainingTime } = current
+        const player = new Player(id, name, userId, connection, remainingTime)
+        player.role = previous.role
 
-        this.state.participants.splice(0, this.state.participants.length)
-        this.state.participants.push(...this.context.participants)
+        this.context.participants[index] = player
+        this.state.participants[index] = player
 
         if (this.state.currentTurn === previous) {
-            this.state.currentTurn = current
-            this.context.currentTurn = this.state.currentTurn
+            this.context.currentTurn = player
+            this.state.currentTurn = player
 
             this.context.resumeCountdown()
         }
