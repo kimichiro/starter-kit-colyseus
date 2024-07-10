@@ -1,4 +1,4 @@
-import { filterChildren, MapSchema, type } from '@colyseus/schema'
+import { ArraySchema, filterChildren, MapSchema, type } from '@colyseus/schema'
 import { Client } from 'colyseus'
 import { injectable } from 'tsyringe'
 
@@ -57,14 +57,20 @@ class Action extends GameAction {
 class Area extends GameArea<Action> {
     @type({ map: 'string' }) readonly table: Map<string, Role>
 
-    @filterChildren(function (this: Area, client: Client, _: string, value: Action, root: GameState<Area, Player>) {
+    @filterChildren(function (
+        this: Area,
+        client: Client,
+        _: string,
+        value: Action,
+        root: GameState<Action, Area, Player>
+    ) {
         return (
             client.sessionId === root.currentTurn?.id &&
             value.role === root.currentTurn?.role &&
             this.table.get(value.position) == null
         )
     })
-    actions: Action[]
+    actions: ArraySchema<Action>
 
     constructor() {
         super([])
@@ -157,10 +163,12 @@ export class TicTacToeEngine extends TurnBasedEngine<Action, Area, Player> {
 
             const otherRole = [Role.Ex, Role.Oh].filter((role) => role !== action.role).pop()
             this.state.currentTurn = this.state.participants.find((participant) => participant.role === otherRole)
-            this.state.area.actions = this.state.area.actions.map((a) => new Action(otherRole, a.position))
+            this.state.area.actions = new ArraySchema(
+                ...this.state.area.actions.map((a) => new Action(otherRole, a.position))
+            )
         } else {
             this.state.currentTurn = null
-            this.state.area.actions = []
+            this.state.area.actions = new ArraySchema()
 
             this.state.result = result
         }

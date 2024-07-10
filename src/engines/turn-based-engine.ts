@@ -4,8 +4,8 @@ import { GameContext, GameEngine } from './game-engine'
 
 export class GameAction extends Schema {}
 
-export abstract class GameArea<Action extends GameAction = GameAction> extends Schema {
-    @type({ array: GameAction }) actions: Action[]
+export abstract class GameArea<Action extends GameAction> extends Schema {
+    @type({ array: GameAction }) actions: ArraySchema<Action>
 
     constructor(actions: Action[]) {
         super()
@@ -69,16 +69,17 @@ export class GameResult extends Schema {
 }
 
 export class GameState<
-    Area extends GameArea = GameArea,
+    Action extends GameAction,
+    Area extends GameArea<Action>,
     Participant extends GameParticipant = GameParticipant,
     Move extends GameMove = GameMove,
     Result extends GameResult = GameResult
 > extends Schema {
     @type(GameArea) area: Area
-    @type({ array: GameParticipant }) participants: Participant[]
+    @type({ array: GameParticipant }) participants: ArraySchema<Participant>
     @type(GameParticipant) currentTurn: Participant | null
 
-    @type({ array: GameMove }) moves: Move[]
+    @type({ array: GameMove }) moves: ArraySchema<Move>
     @type(GameResult) result: Result | null
 
     constructor(
@@ -119,7 +120,7 @@ export abstract class TurnBasedEngine<
     Move extends GameMove = GameMove,
     Result extends GameResult = GameResult,
     Settings extends GameSettings = GameSettings
-> extends GameEngine<GameState<Area, Participant, Move, Result>, TurnBasedContext<Participant>, Settings> {
+> extends GameEngine<GameState<Action, Area, Participant, Move, Result>, TurnBasedContext<Participant>, Settings> {
     abstract updateParticipant(previous: Participant, current: Participant, index: number): void
 
     abstract move(participant: Participant, action: Action): void
